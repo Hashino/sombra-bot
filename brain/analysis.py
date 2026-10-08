@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from . import prompts
 from . import router
+from . import estimate
 
 
 async def _ask(bot, prompt: str, role: str = "default") -> str:
@@ -96,3 +97,53 @@ async def _falsify(bot, question, dossier: str, news: str, max_rounds: int = 2) 
             ),
         )
     return dossier
+
+
+def _days_to_resolution(question) -> float | None:
+    """Best-effort days from now to the question's resolution/close date."""
+    from datetime import datetime, timezone
+    for attr in ("scheduled_resolution_time", "actual_resolve_time",
+                 "scheduled_close_time", "actual_close_time", "close_time"):
+        val = getattr(question, attr, None)
+        if not val:
+            continue
+        try:
+            if isinstance(val, str):
+                val = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            if val.tzinfo is None:
+                val = val.replace(tzinfo=timezone.utc)
+            return (val - datetime.now(timezone.utc)).total_seconds() / 86400.0
+        except Exception:
+            continue
+    return None
+
+
+async def estimate_binary(bot, question, dossier: str) -> tuple[float, str]:
+    """Improvement #1+#2+#3: compose the probability from elicited ingredients
+    (base rate + actor-path probabilities), then calibrate. Falls back to a
+    plain single-number ask if the structured elicitation can't be parsed."""
+    days = _days_to_resolution(question)
+    raw = await _ask(
+        bot,
+        prompts.ESTIMATE_BINARY.format(
+            q=getattr(question, "question_text", ""),
+            rc=getattr(question, "resolution_criteria", "") or "",
+            dossier=dossier,
+        ),
+    )
+    parsed = estimate.parse_estimate(raw)
+    if parsed and "base_rate" in parsed:
+        prob, breakdown = estimate.estimate_probability(parsed, days)
+        return prob, dossier + "\n\n" + breakdown
+
+    # Fallback: never crash — ask for a bare probability the template way.
+    import re
+    ask = await _ask(
+        bot,
+        f"Based on this analysis, give ONLY the final probability the answer is "
+        f"YES, as 'Probability: NN%'.\n\n{dossier}",
+    )
+    m = re.search(r"(\d{1,3}(?:\.\d+)?)\s*%", ask or "")
+    p = estimate._clamp((float(m.group(1)) / 100.0) if m else 0.5, 0.02, 0.98)
+    p = estimate.calibrate(p, days)
+    return p, dossier + f"\n\n(structured parse failed; calibrated fallback = {p:.1%})"

@@ -42,6 +42,12 @@ RESEARCH (use as evidence, not as gospel):
 
 Produce the analysis in these layers, each labeled:
 
+0. OUTSIDE VIEW (base rate). Before any actor reasoning, state the reference
+   class and its base rate: how often does this KIND of outcome happen? (e.g.
+   how often announced-by-date releases ship on time, how often courts meet a
+   self-imposed deadline, how often incumbents in this position survive.) Give a
+   numeric prior BEFORE looking at the specifics. This is your anchor.
+
 1. ACTORS. Enumerate every actor whose choices materially bear on this outcome.
    Name who really holds power over the result (de facto, not by title).
 
@@ -62,9 +68,9 @@ Produce the analysis in these layers, each labeled:
 5. PROJECTION. Play the equilibrium forward to the resolution date. What
    concretely happens, and does it satisfy the resolution criteria?
 
-6. READ. State the direction and strength of your conclusion in plain terms
-   (e.g. "clearly yes", "leans no", "near coin-flip, slight yes"), and name the
-   single biggest thing that would flip it."""
+6. READ. State the direction and strength of your conclusion, EXPLICITLY as a
+   move away from the base rate in layer 0 (how far, and why the actor dynamics
+   justify moving that far), and name the single biggest thing that would flip it."""
 
 MEASUREMENT = """You are a disciplined quantitative forecaster. Avoid narrative; anchor on data.
 
@@ -149,3 +155,28 @@ First line MUST be exactly "MOVES: YES" or "MOVES: NO".
 Then 2-4 sentences: what in the evidence moves it (or why the evidence, despite
 looking relevant, does not change the READ). Do not move the READ for evidence
 that merely restates what was already known."""
+
+
+
+ESTIMATE_BINARY = """You are converting a completed analysis into the INGREDIENTS of a probability.
+Do NOT output a final probability yourself — a separate calculator composes it.
+
+QUESTION: {q}
+RESOLUTION CRITERIA: {rc}
+
+ANALYSIS (use its outside-view base rate and its actor/equilibrium reasoning):
+{dossier}
+
+Output ONLY a JSON object (no prose, no code fence) with these fields:
+{{
+  "base_rate": <float 0-1>,            // the outside-view prior from layer 0
+  "yes_paths": [                       // the INDEPENDENT routes by which the question resolves YES
+    {{"desc": "<short>", "p": <float 0-1>}}  // probability THIS route occurs (for actor paths, the chance the pivotal actor takes the equilibrium action)
+  ],
+  "blocker_p": <float 0-1>,            // probability something blocks YES even if a route fires (0 if none)
+  "inside_confidence": <float 0-1>,    // how much the structural analysis should outweigh the base rate
+  "note": "<one sentence on the key assumption>"
+}}
+If YES has essentially one route, give one path. If the question is really a
+threshold on a measured quantity, let a single path's p be P(quantity crosses
+the threshold). Keep probabilities honest, not performative."""

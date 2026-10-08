@@ -35,5 +35,9 @@ Not every question is actor-driven. A router classifies each question:
 - [x] Actor-model forecaster + measurement lane
 - [x] Falsification loop — multi-round, fresh web re-search each round, early stop
 - [x] Ensemble (template 5x median)
-- [ ] Light calibration (shrink extreme probabilities) — next
+- [x] Base-rate anchor first (outside view) on strategic lane
+- [x] Composed binary probability (noisy-OR over actor paths, blended with prior) — computed, not guessed
+- [x] Calibration (shrink toward 0.5, scaled by resolution horizon) — binary lane
+- [ ] Native composition + calibration for numeric/MC lanes (binary done) — next
+- [ ] Multi-model ensemble (currently 5x same model) — set when key lands
 - [ ] Point the Actions workflow at sombra_bot.py (done at merge)

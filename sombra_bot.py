@@ -20,7 +20,7 @@ import logging
 import dotenv
 
 from main import FallTemplateBot2026, logger  # template = validated plumbing
-from forecasting_tools import MetaculusQuestion
+from forecasting_tools import MetaculusQuestion, ReasonedPrediction, BinaryQuestion
 
 from brain import analysis
 
@@ -28,6 +28,15 @@ logging.basicConfig(level=logging.INFO)
 
 
 class SombraBot(FallTemplateBot2026):
+    async def _run_forecast_on_binary(
+        self, question: BinaryQuestion, research: str
+    ) -> ReasonedPrediction[float]:
+        # Use the structured, computed estimate instead of the template's
+        # single-prompt guess. The 5x ensemble (predictions_per_research_report)
+        # still runs and medians these, so variance is handled upstream.
+        prob, reasoning = await analysis.estimate_binary(self, question, research)
+        return ReasonedPrediction(prediction_value=prob, reasoning=reasoning)
+
     async def research_query(self, query: str) -> str:
         """Run ONE arbitrary query through whatever researcher is configured —
         mirrors the template's run_research dispatch so the falsification loop
