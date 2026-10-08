@@ -31,7 +31,9 @@ Not every question is actor-driven. A router classifies each question:
 ## Status
 - [x] Template base (plumbing works out of the box)
 - [ ] OPENROUTER_API_KEY secret (owner adds, from the participation form)
-- [ ] Router node
-- [ ] Actor-model forecaster
-- [ ] Port sombra falsification loop, retargeted to probability movement
-- [ ] Ensemble + light calibration
+- [x] Router node (heuristic + LLM tiebreaker)
+- [x] Actor-model forecaster + measurement lane
+- [x] Falsification loop — multi-round, fresh web re-search each round, early stop
+- [x] Ensemble (template 5x median)
+- [ ] Light calibration (shrink extreme probabilities) — next
+- [ ] Point the Actions workflow at sombra_bot.py (done at merge)

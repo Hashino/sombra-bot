@@ -28,6 +28,27 @@ logging.basicConfig(level=logging.INFO)
 
 
 class SombraBot(FallTemplateBot2026):
+    async def research_query(self, query: str) -> str:
+        """Run ONE arbitrary query through whatever researcher is configured —
+        mirrors the template's run_research dispatch so the falsification loop
+        gets fresh, dated sources rather than snippets."""
+        researcher = self.get_llm("researcher")
+        try:
+            if isinstance(researcher, str) and researcher.startswith("asknews"):
+                from forecasting_tools import AskNewsSearcher
+                return await AskNewsSearcher().call_preconfigured_version(researcher, query)
+            if isinstance(researcher, str) and researcher.startswith("smart-searcher"):
+                from forecasting_tools import SmartSearcher
+                model_name = researcher.removeprefix("smart-searcher/")
+                return await SmartSearcher(model=model_name, temperature=0,
+                                           num_searches_to_run=2, num_sites_per_search=6).invoke(query)
+            if not researcher or researcher in ("None", "no_research"):
+                return ""
+            return await self.get_llm("researcher", "llm").invoke(query)
+        except Exception as e:  # never let a failed re-search kill the forecast
+            logger.warning(f"research_query failed for {query!r}: {e}")
+            return ""
+
     async def run_research(self, question: MetaculusQuestion) -> str:
         async with self._concurrency_limiter:
             # Reuse the template's news retrieval (AskNews/SmartSearcher) so we

@@ -6,6 +6,7 @@ forecasting_tools import and therefore unit-importable on its own.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from . import prompts
@@ -57,18 +58,41 @@ async def build_dossier(bot, question, news: str) -> str:
     return header + dossier
 
 
-async def _falsify(bot, question, dossier: str, news: str) -> str:
-    """Single bounded adversarial pass (sombra's verify loop, retargeted from
-    'is there a contradiction' to 'does the evidence move the READ'). v1 does one
-    attack+revise round; multi-round with fresh web re-search is the next step."""
+async def _falsify(bot, question, dossier: str, news: str, max_rounds: int = 2) -> str:
+    """Bounded, multi-round adversarial loop (sombra's verify.py, retargeted).
+
+    Each round: generate queries that try to DISPROVE the READ -> run them as
+    FRESH web searches -> judge whether the new evidence moves the READ -> if
+    yes, revise and go again; if no, stop early. Searching anew each round is
+    the point: it surfaces disconfirming evidence the first pass never looked for.
+    """
     q = getattr(question, "question_text", "")
-    attack = await _ask(
-        bot,
-        prompts.FALSIFY_ATTACK.format(q=q, dossier=dossier,
-                                      news=news or "(none)"),
-    )
-    revised = await _ask(
-        bot,
-        prompts.FALSIFY_REVISE.format(q=q, dossier=dossier, attack=attack),
-    )
-    return revised
+    for _ in range(max_rounds):
+        raw = await _ask(bot, prompts.FALSIFY_QUERIES.format(q=q, dossier=dossier))
+        queries = [ln.strip(" -\t") for ln in (raw or "").splitlines() if ln.strip()]
+        queries = [x for x in queries if x.upper() != "NONE"][:4]
+        if not queries:
+            break
+        # fresh searches, concurrently (sombra's search_agent shape)
+        found = await asyncio.gather(
+            *(bot.research_query(x) for x in queries), return_exceptions=True
+        )
+        evidence = "\n\n".join(
+            f"Q: {qq}\n{ev}" for qq, ev in zip(queries, found)
+            if not isinstance(ev, Exception) and ev
+        )
+        if not evidence.strip():
+            break
+        verdict = await _ask(
+            bot, prompts.FALSIFY_JUDGE.format(q=q, dossier=dossier, evidence=evidence)
+        )
+        if "MOVES: YES" not in (verdict or "").upper():
+            break  # evidence does not move the READ -> stop early
+        dossier = await _ask(
+            bot,
+            prompts.FALSIFY_REVISE.format(
+                q=q, dossier=dossier,
+                attack=f"{verdict}\n\nEvidence:\n{evidence}",
+            ),
+        )
+    return dossier

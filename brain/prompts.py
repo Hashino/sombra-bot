@@ -121,3 +121,31 @@ RED-TEAM CRITIQUE:
 Output the FINAL analysis, keeping the same labeled layers, ending with a READ
 that now reflects the surviving evidence. Make the final READ unambiguous about
 direction and strength."""
+
+
+FALSIFY_QUERIES = """You are red-teaming the forecast below. Produce web-search queries whose
+results could DISPROVE its READ — target the weakest premise, the most
+resolution-critical fact, or recent developments that might reverse it.
+
+QUESTION: {q}
+ANALYSIS:
+{dossier}
+
+Output up to 4 search queries, ONE PER LINE, no numbering, no commentary. Each
+query should be specific and recent-evidence-seeking. If the analysis cannot be
+meaningfully attacked with new evidence, output the single line: NONE"""
+
+FALSIFY_JUDGE = """You gathered fresh evidence to test a forecast. Decide, honestly, whether the
+new evidence should MOVE the analysis's READ (its direction or strength).
+
+QUESTION: {q}
+CURRENT READ (from the analysis):
+{dossier}
+
+FRESH EVIDENCE GATHERED:
+{evidence}
+
+First line MUST be exactly "MOVES: YES" or "MOVES: NO".
+Then 2-4 sentences: what in the evidence moves it (or why the evidence, despite
+looking relevant, does not change the READ). Do not move the READ for evidence
+that merely restates what was already known."""
