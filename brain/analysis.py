@@ -118,32 +118,77 @@ def _days_to_resolution(question) -> float | None:
     return None
 
 
-async def estimate_binary(bot, question, dossier: str) -> tuple[float, str]:
-    """Improvement #1+#2+#3: compose the probability from elicited ingredients
-    (base rate + actor-path probabilities), then calibrate. Falls back to a
-    plain single-number ask if the structured elicitation can't be parsed."""
-    days = _days_to_resolution(question)
-    raw = await _ask(
-        bot,
-        prompts.ESTIMATE_BINARY.format(
-            q=getattr(question, "question_text", ""),
-            rc=getattr(question, "resolution_criteria", "") or "",
-            dossier=dossier,
-        ),
-    )
-    parsed = estimate.parse_estimate(raw)
-    if parsed and "base_rate" in parsed:
-        prob, breakdown = estimate.estimate_probability(parsed, days)
-        return prob, dossier + "\n\n" + breakdown
+async def _member_estimate(bot, question, lens: str, context: str):
+    """Run one lens, parse its ingredients, compose a probability + witness."""
+    from . import compose, estimate as E
+    tmpl = {"actor": prompts.ESTIMATE_BINARY, "outside": prompts.OUTSIDE_BINARY,
+            "market": prompts.MARKET_BINARY}[lens]
+    key = "dossier" if lens == "actor" else "research"
+    raw = await _ask(bot, tmpl.format(q=getattr(question,"question_text",""),
+                                      rc=getattr(question,"resolution_criteria","") or "",
+                                      **{key: context}))
+    parsed = E.parse_estimate(raw)
+    if not parsed or "base_rate" not in parsed:
+        return None
+    p, ok, note = compose.compose_binary(parsed)
+    return {"lens": lens, "prob": p, "witness_ok": ok, "note": note}
 
-    # Fallback: never crash — ask for a bare probability the template way.
-    import re
-    ask = await _ask(
-        bot,
-        f"Based on this analysis, give ONLY the final probability the answer is "
-        f"YES, as 'Probability: NN%'.\n\n{dossier}",
+
+async def run_ensemble_binary(bot, question, research: str) -> tuple[float, str]:
+    """Improvement #1 (THE anti-naivety fix): forecast with a DIVERSE PANEL of
+    reasoning lenses, not one. (actor/game-theory brain) + (pure outside-view
+    base rate) + (market/status-quo). Median; a wide split triggers a judge
+    synthesis instead of blind averaging; then calibrate by horizon."""
+    import asyncio
+    from . import aggregate, estimate as E
+
+    # the actor member gets the full falsification-hardened dossier; the other
+    # two are lighter, deliberately decorrelated reasoning paths.
+    actor_dossier = await build_dossier(bot, question, research)
+    members = await asyncio.gather(
+        _member_estimate(bot, question, "actor", actor_dossier),
+        _member_estimate(bot, question, "outside", research),
+        _member_estimate(bot, question, "market", research),
     )
+    members = [m for m in members if m]
+    if not members:
+        # total failure -> fall back to a single plain estimate
+        return await _fallback_binary(bot, question, actor_dossier)
+
+    agg = aggregate.aggregate_binary([m["prob"] for m in members])
+    days = _days_to_resolution(question)
+
+    if agg["needs_tiebreaker"]:
+        import re
+        body = "\n".join(f"- {m['lens']}: P(YES)={m['prob']:.0%} ({m['note']})" for m in members)
+        judged = await _ask(bot, prompts.JUDGE_BINARY.format(
+            q=getattr(question,"question_text",""), members=body))
+        mm = re.search(r"(\d{1,3}(?:\.\d+)?)\s*%", judged or "")
+        final = E._clamp((float(mm.group(1))/100.0) if mm else agg["prob"], 0.0, 1.0)
+        method = f"tiebreaker-judge (spread {agg['spread']:.0%})"
+    else:
+        final = agg["prob"]
+        method = f"median of {agg['n']} lenses (spread {agg['spread']:.0%})"
+
+    final = E.calibrate(final, days)
+    reasoning = (actor_dossier + "\n\nPANEL:\n"
+                 + "\n".join(f"- {m['lens']}: {m['prob']:.0%}"
+                              + ("" if m["witness_ok"] else " [witness reverted]")
+                              + f" — {m['note']}" for m in members)
+                 + f"\n\nAGGREGATION: {method} -> calibrated {final:.1%}")
+    return final, reasoning
+
+
+async def _fallback_binary(bot, question, dossier: str) -> tuple[float, str]:
+    import re
+    from . import estimate as E
+    ask = await _ask(bot, f"Give ONLY 'Probability: NN%' for YES.\n\n{dossier}")
     m = re.search(r"(\d{1,3}(?:\.\d+)?)\s*%", ask or "")
-    p = estimate._clamp((float(m.group(1)) / 100.0) if m else 0.5, 0.02, 0.98)
-    p = estimate.calibrate(p, days)
-    return p, dossier + f"\n\n(structured parse failed; calibrated fallback = {p:.1%})"
+    p = E.calibrate(E._clamp((float(m.group(1))/100.0) if m else 0.5, 0.02, 0.98),
+                    _days_to_resolution(question))
+    return p, dossier + f"\n\n(ensemble failed; fallback {p:.1%})"
+
+
+async def estimate_binary(bot, question, dossier: str) -> tuple[float, str]:
+    # kept for compatibility; delegates to the ensemble (research == dossier context)
+    return await run_ensemble_binary(bot, question, dossier)

@@ -158,25 +158,64 @@ that merely restates what was already known."""
 
 
 
-ESTIMATE_BINARY = """You are converting a completed analysis into the INGREDIENTS of a probability.
-Do NOT output a final probability yourself — a separate calculator composes it.
+ESTIMATE_BINARY = """Convert the completed ANALYSIS into the INGREDIENTS of a probability. Do NOT
+state a final probability — a calculator composes it from what you give.
 
 QUESTION: {q}
 RESOLUTION CRITERIA: {rc}
-
-ANALYSIS (use its outside-view base rate and its actor/equilibrium reasoning):
+ANALYSIS:
 {dossier}
 
-Output ONLY a JSON object (no prose, no code fence) with these fields:
+Output ONLY a JSON object (no prose, no fence):
 {{
-  "base_rate": <float 0-1>,            // the outside-view prior from layer 0
-  "yes_paths": [                       // the INDEPENDENT routes by which the question resolves YES
-    {{"desc": "<short>", "p": <float 0-1>}}  // probability THIS route occurs (for actor paths, the chance the pivotal actor takes the equilibrium action)
+  "base_rate": <0-1>,              // outside-view prior from the base-rate layer
+  "branches": [                    // mutually-exclusive scenarios for how it resolves; weights should sum to ~1
+    {{"desc": "<short>", "w": <0-1>, "p_yes": <0-1>}}  // w=chance of this scenario; p_yes=P(YES | this scenario)
   ],
-  "blocker_p": <float 0-1>,            // probability something blocks YES even if a route fires (0 if none)
-  "inside_confidence": <float 0-1>,    // how much the structural analysis should outweigh the base rate
-  "note": "<one sentence on the key assumption>"
+  "market_floor": <0-1 or null>,   // if a prediction market ENTAILS a lower bound on P(YES), else null
+  "market_ceiling": <0-1 or null>, // upper bound if entailed, else null
+  "inside_confidence": <0-1>,      // how much the structural analysis should outweigh the base rate
+  "mass_yes": <0-1>,               // INDEPENDENTLY of the branches above, your holistic P(YES). This is a self-check.
+  "note": "<key assumption>"
 }}
-If YES has essentially one route, give one path. If the question is really a
-threshold on a measured quantity, let a single path's p be P(quantity crosses
-the threshold). Keep probabilities honest, not performative."""
+If resolution hinges on one scenario, use one branch. Keep probabilities honest."""
+
+OUTSIDE_BINARY = """You are the OUTSIDE-VIEW member of a forecasting panel. IGNORE the narrative
+and the specific actors. Answer only from the reference class: how often does
+this KIND of event resolve YES, historically? Resist being moved by vivid recent
+detail — that is another member's job.
+
+QUESTION: {q}
+RESOLUTION CRITERIA: {rc}
+RESEARCH (for base rates only):
+{research}
+
+Output ONLY JSON:
+{{"base_rate": <0-1>, "branches": [{{"desc":"reference class","w":1,"p_yes":<0-1>}}],
+  "inside_confidence": 0.15, "mass_yes": <0-1, ~= your base rate>, "note": "<the reference class used>"}}"""
+
+MARKET_BINARY = """You are the MARKET & STATUS-QUO member of a forecasting panel. Anchor on (a)
+any prediction-market prices in the research and (b) a strong status-quo prior
+(most things that need a change to resolve YES do NOT happen by the deadline).
+Convert market signals into bounds, not gospel.
+
+QUESTION: {q}
+RESOLUTION CRITERIA: {rc}
+RESEARCH:
+{research}
+
+Output ONLY JSON:
+{{"base_rate": <0-1 status-quo prior>, "branches": [{{"desc":"market/status-quo","w":1,"p_yes":<0-1>}}],
+  "market_floor": <0-1 or null>, "market_ceiling": <0-1 or null>,
+  "inside_confidence": 0.5, "mass_yes": <0-1>, "note": "<markets cited or status-quo reasoning>"}}"""
+
+JUDGE_BINARY = """Three forecasting panel members disagree sharply on this question. Read their
+reasoning and synthesize ONE calibrated probability. Favor the member whose
+evidence is strongest; do not just average. Beware the elegant-narrative member
+being confidently wrong against the base rate.
+
+QUESTION: {q}
+MEMBERS:
+{members}
+
+Output ONLY: "Probability: NN%" then one sentence of justification."""

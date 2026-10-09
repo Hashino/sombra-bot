@@ -34,7 +34,7 @@ class SombraBot(FallTemplateBot2026):
         # Use the structured, computed estimate instead of the template's
         # single-prompt guess. The 5x ensemble (predictions_per_research_report)
         # still runs and medians these, so variance is handled upstream.
-        prob, reasoning = await analysis.estimate_binary(self, question, research)
+        prob, reasoning = await analysis.run_ensemble_binary(self, question, research)
         return ReasonedPrediction(prediction_value=prob, reasoning=reasoning)
 
     async def research_query(self, query: str) -> str:
@@ -60,12 +60,13 @@ class SombraBot(FallTemplateBot2026):
 
     async def run_research(self, question: MetaculusQuestion) -> str:
         async with self._concurrency_limiter:
-            # Reuse the template's news retrieval (AskNews/SmartSearcher) so we
-            # inherit dated, real sources — fixing sombra's snippet-only weakness.
+            # Return the shared RAW research bundle. Every ensemble lens consumes
+            # it; the actor member builds its structured dossier from it inside
+            # the ensemble, so the dossier is NOT built here (built once, per
+            # question, by the actor member).
             news = await super().run_research(question)
-            dossier = await analysis.build_dossier(self, question, news)
-            logger.info(f"sombra dossier for {question.page_url}:\n{dossier}")
-            return dossier
+            logger.info(f"sombra research for {question.page_url}:\n{news[:500]}")
+            return news
 
 
 if __name__ == "__main__":
