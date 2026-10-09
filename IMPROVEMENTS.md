@@ -21,7 +21,18 @@
 > INCIDENTS.md. What remains is genuinely blocked, not skipped:
 >
 > - [dropped] #10 Monte-Carlo-in-code — redundant 3rd composition path + sandbox risk; branch-mixture covers it.
-> - [blocked-on-resolutions] #5 learned Platt fit — no resolved questions yet; heuristic horizon-calibration live. Build the eval harness after the first MiniBench round resolves.
+> - #5 splits in two, DIFFERENT blockers:
+>   - [done, run blocked-on-key] BACKTEST harness (backtest.py + brain/scoring.py):
+>     runs the brain over resolved HISTORICAL questions as-of a past date
+>     (bot._asof_cutoff drives the #14 leakage filter), scores Brier / Metaculus
+>     baseline / ECE and the EDGE over the crowd, broken down BY aggregation method
+>     (so we can see whether the actor/judge lens earns its place). The pure
+>     scoring + as-of + method-extraction core is unit-tested and the `score`
+>     CLI runs now; executing `run` needs the API key, and the Metaculus
+>     resolved-question loader is stubbed with explicit wiring instructions
+>     (local JSONL loader works today). Fidelity caveat documented in backtest.py.
+>   - [blocked-on-our-resolutions] learned Platt fit on OUR outputs — needs our
+>     own forecasts to resolve; heuristic horizon-calibration is live meanwhile.
 > - [blocked-on-key] #1b model-LINEAGE diversity, #13 provider fanout, #24 prompt caching — need OPENROUTER_API_KEY + provider config; the reasoning-PATH diversity (the load-bearing half of #1) is already live.
 > - [deferred] #7 full hidden-data-file scraper ladder — the status-quo numeric lens already sizes width from the series; the 40-hop ladder is a later density tweak.
 > - [deferred] #15 fact/opinion split — low marginal value over the current research pass.

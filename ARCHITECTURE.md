@@ -44,6 +44,7 @@ Not every question is actor-driven. A router classifies each question:
 - [x] Research orchestration — evidence plan + resolution-source read + artifact-check gap loop (shared bundle, time-boxed)
 - [x] Hygiene — deterministic evidence banner, date-leakage filter, parser salvage, graceful degradation on every lane
 - [x] Regression — tests/test_brain.py (17 golden-replay cases) + INCIDENTS.md
-- [ ] Learned calibration (Platt) + offline eval loop — blocked on first resolved MiniBench round
+- [x] Backtest harness (backtest.py + brain/scoring.py) — as-of replay over resolved questions, Brier/baseline/ECE/edge, by-method breakdown; `score` runs now, `run` needs the key
+- [ ] Learned calibration (Platt) on OUR outputs — blocked on first resolved MiniBench round
 - [ ] Multi-model LINEAGE ensemble + prompt caching (reasoning-PATH diversity already live) — set when key lands
 - [ ] Point the Actions workflow at sombra_bot.py (done at merge)

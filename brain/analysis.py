@@ -32,11 +32,16 @@ def _resolution_date(question):
     return None
 
 
-def _prepare_research(question, research: str) -> tuple[str, str]:
+def _prepare_research(bot, question, research: str) -> tuple[str, str]:
     """Deterministic pre-pass shared by every lane: drop post-cutoff sources
     (#14) and stamp an authoritative evidence banner (#20). Returns
-    (research_for_llm, evidence_level)."""
-    clean = hygiene.drop_sources_after(research or "", _resolution_date(question))
+    (research_for_llm, evidence_level).
+
+    Cutoff for the leakage filter: `bot._asof_cutoff` when set (BACKTEST — pretend
+    it is that date, so sources published later are dropped), else the question's
+    resolution date (live — in the future, so the filter is a no-op)."""
+    cutoff = getattr(bot, "_asof_cutoff", None) or _resolution_date(question)
+    clean = hygiene.drop_sources_after(research or "", cutoff)
     level, banner = hygiene.evidence_state(clean)
     out = (banner + "\n\n" + clean) if banner else clean
     return out, level
@@ -252,7 +257,7 @@ async def run_ensemble_binary(bot, question, research: str) -> tuple[float, str]
     import asyncio
     from . import aggregate, estimate as E
 
-    research, ev_level = _prepare_research(question, research)
+    research, ev_level = _prepare_research(bot, question, research)
     # the actor member gets the full falsification-hardened dossier; the other
     # two are lighter, deliberately decorrelated reasoning paths.
     actor_dossier = await build_dossier(bot, question, research)
@@ -355,7 +360,7 @@ async def run_ensemble_numeric(bot, question, research: str) -> tuple[dict, str]
     outside-view and status-quo decorrelate it; code blends in quantile space."""
     from . import numeric as N
 
-    research, _ = _prepare_research(question, research)
+    research, _ = _prepare_research(bot, question, research)
     lo, hi, open_lo, open_hi, unit = _numeric_bounds(question)
     dossier = await build_dossier(bot, question, research)
     members = await asyncio.gather(
@@ -425,7 +430,7 @@ async def run_ensemble_multiple_choice(bot, question, research: str) -> tuple[di
     if not options:
         return {}, "(no options on question)"
 
-    research, _ = _prepare_research(question, research)
+    research, _ = _prepare_research(bot, question, research)
     dossier = await build_dossier(bot, question, research)
     members = await asyncio.gather(
         _mc_member(bot, question, "actor", dossier, options),

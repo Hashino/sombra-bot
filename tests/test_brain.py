@@ -22,6 +22,7 @@ from brain import aggregate as A
 from brain import numeric as N
 from brain import hygiene as H
 from brain import router as R
+from brain import scoring as S
 
 
 # --------------------------- estimate.py ----------------------------------- #
@@ -173,6 +174,45 @@ def test_extract_urls_dedupes_and_strips():
         background_info = ""
 
     assert An._extract_urls(Q()) == ["https://ex.gov/r", "https://data.org/s.csv"]
+
+
+# --------------------------- scoring.py (backtest core) -------------------- #
+
+def test_baseline_and_brier():
+    assert abs(S.baseline_binary(0.5, 1)) < 1e-6       # uninformative -> 0
+    assert S.baseline_binary(0.99, 1) > 95             # confident right -> high
+    assert S.baseline_binary(0.99, 0) < -100           # confident wrong -> very negative
+    assert abs(S.brier_binary(0.7, 1) - 0.09) < 1e-9
+    assert abs(S.baseline_mc({"A": 0.5, "B": 0.5}, "A")) < 1e-6  # uniform -> 0
+
+
+def test_ece_detects_overconfidence():
+    good = [(0.2, 0)] * 8 + [(0.2, 1)] * 2 + [(0.8, 1)] * 8 + [(0.8, 0)] * 2
+    bad = [(0.95, 0)] * 5 + [(0.95, 1)] * 5
+    assert S.expected_calibration_error(good) < 0.02
+    assert S.expected_calibration_error(bad) > 0.4
+
+
+def test_summarize_edge_and_by_method():
+    recs = [
+        {"prob": 0.8, "outcome": 1, "community": 0.6, "method": "median"},
+        {"prob": 0.3, "outcome": 0, "community": 0.5, "method": "median"},
+        {"prob": 0.9, "outcome": 0, "community": 0.4, "method": "judge"},
+        {"prob": None, "outcome": 1, "method": "ERROR"},  # dropped
+    ]
+    summ = S.summarize_binary(recs)
+    assert summ["n"] == 3 and "edge_over_community" in summ
+    bym = S.summarize_by_method(recs)
+    assert set(bym) >= {"median", "judge"}
+
+
+def test_backtest_method_extraction_and_asof():
+    from backtest import extract_method, _ShimQuestion, _asof_date
+    import datetime as dt
+    assert extract_method("x\nAGGREGATION: tiebreaker-judge -> cal 45%").startswith("tiebreaker-judge")
+    q = _ShimQuestion({"question_text": "Will X?", "outcome": 1,
+                       "community": 0.6, "open_date": "2026-06-01"})
+    assert _asof_date(q) == dt.date(2026, 6, 1) and q._outcome == 1
 
 
 if __name__ == "__main__":
