@@ -19,8 +19,17 @@ import logging
 
 import dotenv
 
-from main import FallTemplateBot2026, logger  # template = validated plumbing
-from forecasting_tools import MetaculusQuestion, ReasonedPrediction, BinaryQuestion
+from main import FallTemplateBot2026, logger, structure_output  # template = validated plumbing
+from forecasting_tools import (
+    MetaculusQuestion,
+    ReasonedPrediction,
+    BinaryQuestion,
+    NumericQuestion,
+    NumericDistribution,
+    Percentile,
+    MultipleChoiceQuestion,
+    PredictedOptionList,
+)
 
 from brain import analysis
 
@@ -36,6 +45,68 @@ class SombraBot(FallTemplateBot2026):
         # still runs and medians these, so variance is handled upstream.
         prob, reasoning = await analysis.run_ensemble_binary(self, question, research)
         return ReasonedPrediction(prediction_value=prob, reasoning=reasoning)
+
+    async def _run_forecast_on_numeric(
+        self, question: NumericQuestion, research: str
+    ) -> ReasonedPrediction[NumericDistribution]:
+        # Structured numeric lane: each reasoning lens emits a mixture of named
+        # distribution components (one per resolution route); code inverts the
+        # blended CDF into percentiles. If it yields nothing usable, fall back to
+        # the template's validated single-prompt path rather than ship garbage.
+        try:
+            pcts, reasoning = await analysis.run_ensemble_numeric(self, question, research)
+        except Exception as e:
+            logger.warning(f"numeric ensemble failed for {question.page_url}: {e}")
+            pcts = {}
+            reasoning = ""
+        if not pcts or len(pcts) < 3:
+            logger.info(f"numeric ensemble empty for {question.page_url}; using template path")
+            return await super()._run_forecast_on_numeric(question, research)
+
+        percentile_list = [
+            Percentile(percentile=float(q), value=float(v))
+            for q, v in sorted(pcts.items())
+        ]
+        prediction = NumericDistribution.from_question(percentile_list, question)
+        logger.info(
+            f"sombra numeric {question.page_url}: {prediction.declared_percentiles}"
+        )
+        return ReasonedPrediction(prediction_value=prediction, reasoning=reasoning)
+
+    async def _run_forecast_on_multiple_choice(
+        self, question: MultipleChoiceQuestion, research: str
+    ) -> ReasonedPrediction[PredictedOptionList]:
+        # Diverse-panel distribution over the options. The probabilities are
+        # COMPUTED in code (median-per-option + renormalize); we hand the computed
+        # final answer to the template's own validated parser so the returned
+        # PredictedOptionList is typed exactly as the plumbing expects.
+        try:
+            probs, reasoning = await analysis.run_ensemble_multiple_choice(
+                self, question, research)
+        except Exception as e:
+            logger.warning(f"MC ensemble failed for {question.page_url}: {e}")
+            probs = {}
+            reasoning = ""
+        if not probs:
+            logger.info(f"MC ensemble empty for {question.page_url}; using template path")
+            return await super()._run_forecast_on_multiple_choice(question, research)
+
+        final_block = "\n".join(f"{opt}: {p * 100:.1f}%" for opt, p in probs.items())
+        text = f"{reasoning}\n\nFinal probabilities:\n{final_block}"
+        parsing_instructions = (
+            f"Make sure every option name is one of: {question.options}. "
+            "Do not skip any option; include 0% entries explicitly. Parse the "
+            "probabilities verbatim from the 'Final probabilities' block."
+        )
+        predicted: PredictedOptionList = await structure_output(
+            text_to_structure=text,
+            output_type=PredictedOptionList,
+            model=self.get_llm("parser", "llm"),
+            num_validation_samples=self._structure_output_validation_samples,
+            additional_instructions=parsing_instructions,
+        )
+        logger.info(f"sombra MC {question.page_url}: {predicted}")
+        return ReasonedPrediction(prediction_value=predicted, reasoning=reasoning)
 
     async def research_query(self, query: str) -> str:
         """Run ONE arbitrary query through whatever researcher is configured —

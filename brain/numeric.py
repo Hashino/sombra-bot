@@ -76,3 +76,70 @@ def quantile_space_average(percentile_dicts: list[dict]) -> dict:
             out[q] = last
         last = out[q]
     return out
+
+
+def component_search_range(components: list[dict], pad_sd: float = 4.0) -> tuple[float, float]:
+    """Derive a [lo, hi] bracket to invert the CDF over, from the components
+    themselves — used when the question's bound is OPEN (no hard limit)."""
+    los, his = [], []
+    for c in components:
+        fam = (c.get("family") or "normal").lower()
+        if fam == "lognormal":
+            mu = float(c.get("mu", c.get("median_log", 0.0)))
+            sigma = max(1e-9, float(c.get("sigma", 1.0)))
+            los.append(math.exp(mu - pad_sd * sigma))
+            his.append(math.exp(mu + pad_sd * sigma))
+        else:
+            mean = float(c.get("mean", c.get("median", 0.0)))
+            sd = max(1e-9, float(c.get("sd", c.get("std", 1.0))))
+            los.append(mean - pad_sd * sd)
+            his.append(mean + pad_sd * sd)
+    if not los:
+        return (0.0, 1.0)
+    return (min(los), max(his))
+
+
+def widen_tails(pcts: dict, factor: float = 1.15) -> dict:
+    """Push the outer percentiles further from the median (humility about unknown
+    unknowns — every studied bot widened and never narrowed). Interior untouched."""
+    if not pcts:
+        return pcts
+    qs = sorted(pcts)
+    mid = pcts.get(0.5) or pcts[qs[len(qs) // 2]]
+    out = {}
+    for q in qs:
+        if q <= 0.1 or q >= 0.9:
+            out[q] = mid + factor * (pcts[q] - mid)
+        else:
+            out[q] = pcts[q]
+    # re-impose monotonicity after widening
+    last = None
+    for q in qs:
+        if last is not None and out[q] < last:
+            out[q] = last
+        last = out[q]
+    return out
+
+
+def clamp_to_bounds(pcts: dict, lo, hi, open_lo: bool, open_hi: bool) -> dict:
+    """Clamp percentile VALUES into the question's declared bounds. A CLOSED bound
+    is a hard wall; an OPEN bound is only a soft hint, so we leave a little room
+    past it rather than pinning mass onto the wall."""
+    if not pcts:
+        return pcts
+    out = dict(pcts)
+    span = (max(pcts.values()) - min(pcts.values())) or 1.0
+    if lo is not None:
+        wall = float(lo) if not open_lo else float(lo) - 0.10 * span
+        out = {q: max(v, wall) for q, v in out.items()}
+    if hi is not None:
+        wall = float(hi) if not open_hi else float(hi) + 0.10 * span
+        out = {q: min(v, wall) for q, v in out.items()}
+    # monotonicity again (clamping two walls can invert near-degenerate cases)
+    qs = sorted(out)
+    last = None
+    for q in qs:
+        if last is not None and out[q] < last:
+            out[q] = last
+        last = out[q]
+    return out

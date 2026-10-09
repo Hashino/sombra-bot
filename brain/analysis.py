@@ -192,3 +192,154 @@ async def _fallback_binary(bot, question, dossier: str) -> tuple[float, str]:
 async def estimate_binary(bot, question, dossier: str) -> tuple[float, str]:
     # kept for compatibility; delegates to the ensemble (research == dossier context)
     return await run_ensemble_binary(bot, question, dossier)
+
+
+# --------------------------------------------------------------------------- #
+#  Numeric / date lane (improvement #6/#8): mixture of named components per    #
+#  resolution route -> monotone CDF -> quantile-space average across lenses.   #
+# --------------------------------------------------------------------------- #
+
+def _numeric_bounds(question):
+    """(lo, hi, open_lo, open_hi, unit) from the question, nominal bounds first.
+    None for a bound means "no usable hard limit" (treat as open)."""
+    def _num(*names):
+        for n in names:
+            v = getattr(question, n, None)
+            if v is not None:
+                return v
+        return None
+    lo = _num("nominal_lower_bound", "lower_bound")
+    hi = _num("nominal_upper_bound", "upper_bound")
+    open_lo = bool(getattr(question, "open_lower_bound", False))
+    open_hi = bool(getattr(question, "open_upper_bound", False))
+    unit = getattr(question, "unit_of_measure", None) or "(infer the unit)"
+    # dates arrive as datetimes; the override converts, so keep numeric here only
+    return lo, hi, open_lo, open_hi, unit
+
+
+async def _numeric_member(bot, question, lens: str, context: str, unit: str):
+    from . import estimate as E
+    tmpl = {"structural": prompts.NUMERIC_STRUCTURAL,
+            "outside": prompts.NUMERIC_OUTSIDE,
+            "statusquo": prompts.NUMERIC_STATUSQUO}[lens]
+    key = "dossier" if lens == "structural" else "research"
+    raw = await _ask(bot, tmpl.format(
+        q=getattr(question, "question_text", ""),
+        rc=getattr(question, "resolution_criteria", "") or "",
+        unit=unit, **{key: context}))
+    parsed = E.parse_estimate(raw)
+    comps = (parsed or {}).get("components") if parsed else None
+    if not comps or not isinstance(comps, list):
+        return None
+    good = [c for c in comps if isinstance(c, dict)]
+    if not good:
+        return None
+    return {"lens": lens, "components": good, "note": (parsed or {}).get("note", "")}
+
+
+async def run_ensemble_numeric(bot, question, research: str) -> tuple[dict, str]:
+    """Return ({q(0-1): value}, reasoning). The binary panel's logic, adapted:
+    the structural member maps game-theoretic branches to distribution components;
+    outside-view and status-quo decorrelate it; code blends in quantile space."""
+    from . import numeric as N
+
+    lo, hi, open_lo, open_hi, unit = _numeric_bounds(question)
+    dossier = await build_dossier(bot, question, research)
+    members = await asyncio.gather(
+        _numeric_member(bot, question, "structural", dossier, unit),
+        _numeric_member(bot, question, "outside", research, unit),
+        _numeric_member(bot, question, "statusquo", research, unit),
+    )
+    members = [m for m in members if m]
+    qs = (0.05, 0.1, 0.2, 0.4, 0.5, 0.6, 0.8, 0.9, 0.95)
+
+    member_pcts = []
+    for m in members:
+        comps = m["components"]
+        # bracket to invert over: hard bounds when closed, else component-derived
+        c_lo, c_hi = N.component_search_range(comps)
+        blo = float(lo) if (lo is not None and not open_lo) else c_lo
+        bhi = float(hi) if (hi is not None and not open_hi) else c_hi
+        if bhi <= blo:
+            blo, bhi = c_lo, c_hi
+        member_pcts.append(N.percentiles_from_mixture(comps, blo, bhi, qs))
+
+    if not member_pcts:
+        return {}, dossier + "\n\n(numeric ensemble produced no components)"
+
+    blended = N.quantile_space_average(member_pcts)
+    blended = N.widen_tails(blended)
+    blended = N.clamp_to_bounds(blended, lo, hi, open_lo, open_hi)
+
+    panel = "\n".join(
+        f"- {m['lens']}: {len(m['components'])} component(s) — {m['note']}"
+        for m in members)
+    pct_line = ", ".join(f"P{int(q*100)}={blended[q]:.4g}" for q in sorted(blended))
+    reasoning = (dossier + "\n\nNUMERIC PANEL (mixture of components per route):\n"
+                 + panel + "\n\nBLENDED (quantile-space, tails widened, bounds applied):\n"
+                 + pct_line)
+    return blended, reasoning
+
+
+# --------------------------------------------------------------------------- #
+#  Multiple-choice lane (improvement #1 extended): same diverse panel, but the #
+#  members emit a distribution over a fixed option set; code medians per-option#
+#  and renormalizes (never a learned stacker).                                 #
+# --------------------------------------------------------------------------- #
+
+async def _mc_member(bot, question, lens: str, context: str, options: list):
+    from . import estimate as E, aggregate as A
+    tmpl = {"actor": prompts.ESTIMATE_MC, "outside": prompts.OUTSIDE_MC,
+            "market": prompts.MARKET_MC}[lens]
+    key = "dossier" if lens == "actor" else "research"
+    raw = await _ask(bot, tmpl.format(
+        q=getattr(question, "question_text", ""),
+        rc=getattr(question, "resolution_criteria", "") or "",
+        options=options, **{key: context}))
+    parsed = E.parse_estimate(raw)
+    if not parsed:
+        return None
+    probs = A.normalize_option_probs(parsed, options)
+    return {"lens": lens, "probs": probs, "note": parsed.get("note", "")}
+
+
+async def run_ensemble_multiple_choice(bot, question, research: str) -> tuple[dict, str]:
+    """Return ({option: prob}, reasoning). Diverse panel -> per-option median ->
+    floor + renormalize; a wide split triggers a judge synthesis."""
+    from . import aggregate as A, estimate as E
+
+    options = list(getattr(question, "options", []) or [])
+    if not options:
+        return {}, "(no options on question)"
+
+    dossier = await build_dossier(bot, question, research)
+    members = await asyncio.gather(
+        _mc_member(bot, question, "actor", dossier, options),
+        _mc_member(bot, question, "outside", research, options),
+        _mc_member(bot, question, "market", research, options),
+    )
+    members = [m for m in members if m]
+    if not members:
+        return {}, dossier + "\n\n(MC ensemble produced no members)"
+
+    agg = A.aggregate_multiple_choice([m["probs"] for m in members], options)
+    probs, method = agg["probs"], f"per-option median of {agg['n']} lenses"
+
+    if agg.get("needs_tiebreaker"):
+        body = "\n".join(
+            f"- {m['lens']}: " + ", ".join(f"{o}={m['probs'][o]:.0%}" for o in options)
+            + f" ({m['note']})" for m in members)
+        judged = await _ask(bot, prompts.JUDGE_MC.format(
+            q=getattr(question, "question_text", ""), options=options, members=body))
+        parsed = E.parse_estimate(judged)
+        if parsed:
+            probs = A.normalize_option_probs(parsed, options)
+            method = f"tiebreaker-judge (spread {agg['spread']:.0%})"
+
+    panel = "\n".join(
+        f"- {m['lens']}: " + ", ".join(f"{o}={m['probs'][o]:.0%}" for o in options)
+        for m in members)
+    final = ", ".join(f"{o}={probs[o]:.1%}" for o in options)
+    reasoning = (dossier + "\n\nMC PANEL:\n" + panel
+                 + f"\n\nAGGREGATION: {method}\nFINAL: {final}")
+    return probs, reasoning

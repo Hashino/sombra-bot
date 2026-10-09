@@ -209,6 +209,58 @@ Output ONLY JSON:
   "market_floor": <0-1 or null>, "market_ceiling": <0-1 or null>,
   "inside_confidence": 0.5, "mass_yes": <0-1>, "note": "<markets cited or status-quo reasoning>"}}"""
 
+## ---- numeric lane: one smooth component per resolution scenario / route ----
+
+_NUMERIC_JSON = """Output ONLY a JSON object (no prose, no fence):
+{{
+  "components": [            // ONE per genuinely distinct resolution scenario; weights w should sum to ~1
+    {{"desc": "<short>", "w": <0-1>,
+      "family": "normal" | "lognormal" | "truncated_normal",
+      "mean": <num>, "sd": <num>,          // for normal / truncated_normal (sd = ~1 std dev of the value)
+      "mu": <num>, "sigma": <num>,         // for lognormal (natural-log space); omit the pair you don't use
+      "lo": <num or null>, "hi": <num or null>}}   // only for truncated_normal
+  ],
+  "note": "<the key driver of the spread>"
+}}
+Use a SEPARATE component for each scenario that lands the value in a different
+region (do not average distinct outcomes into one wide blob). Make each sd/sigma
+honest about within-scenario uncertainty. Units: {unit}."""
+
+NUMERIC_STRUCTURAL = """Convert the completed ANALYSIS into a MIXTURE of distribution components — one
+per distinct way the question resolves (map them from the branches/equilibria in
+the analysis). A calculator turns these into percentiles; do NOT emit percentiles.
+
+QUESTION: {q}
+RESOLUTION CRITERIA: {rc}
+ANALYSIS:
+{dossier}
+
+""" + _NUMERIC_JSON
+
+NUMERIC_OUTSIDE = """You are the OUTSIDE-VIEW member. Ignore the specific narrative; give the
+reference-class distribution for this quantity: where have comparable cases
+historically landed? One or two components describing that empirical spread.
+
+QUESTION: {q}
+RESOLUTION CRITERIA: {rc}
+RESEARCH (for base rates / history only):
+{research}
+
+""" + _NUMERIC_JSON
+
+NUMERIC_STATUSQUO = """You are the STATUS-QUO / TREND member. Anchor on the latest actual value in the
+research and project it to the resolution date with only the current trend and
+normal volatility — no dramatic scenarios. Usually ONE component centered on that
+projection, with sd reflecting how much the series actually moves over this horizon.
+
+QUESTION: {q}
+RESOLUTION CRITERIA: {rc}
+RESEARCH:
+{research}
+
+""" + _NUMERIC_JSON
+
+
 JUDGE_BINARY = """Three forecasting panel members disagree sharply on this question. Read their
 reasoning and synthesize ONE calibrated probability. Favor the member whose
 evidence is strongest; do not just average. Beware the elegant-narrative member
@@ -219,3 +271,55 @@ MEMBERS:
 {members}
 
 Output ONLY: "Probability: NN%" then one sentence of justification."""
+
+
+## ---- multiple-choice lane: a probability over a fixed option set ----
+
+_MC_JSON = """The options are EXACTLY: {options}
+Output ONLY a JSON object mapping each option name to its probability (0-1),
+using the option names verbatim. They should sum to ~1. Leave some moderate mass
+on unlikely options (surprises happen); never hard-zero an option.
+{{ "<option>": <0-1>, ... , "note": "<key driver>" }}"""
+
+ESTIMATE_MC = """Convert the completed ANALYSIS into a probability distribution over the options.
+Map the branches/equilibria in the analysis onto the options.
+
+QUESTION: {q}
+RESOLUTION CRITERIA: {rc}
+ANALYSIS:
+{dossier}
+
+""" + _MC_JSON
+
+OUTSIDE_MC = """You are the OUTSIDE-VIEW member. From the reference class / base rates only —
+how often does each KIND of option win historically? Ignore the vivid specifics.
+
+QUESTION: {q}
+RESOLUTION CRITERIA: {rc}
+RESEARCH (base rates only):
+{research}
+
+""" + _MC_JSON
+
+MARKET_MC = """You are the MARKET & STATUS-QUO member. Anchor on any market/poll signals in the
+research and a status-quo prior (the option representing "no change" gets extra
+weight). Convert signals into probabilities, not gospel.
+
+QUESTION: {q}
+RESOLUTION CRITERIA: {rc}
+RESEARCH:
+{research}
+
+""" + _MC_JSON
+
+JUDGE_MC = """Panel members disagree on this multiple-choice question. Synthesize ONE
+distribution over the options. Favor the strongest evidence; keep moderate mass
+on surprises; do not hard-zero.
+
+QUESTION: {q}
+OPTIONS (verbatim): {options}
+MEMBERS:
+{members}
+
+Output ONLY a JSON object mapping each option to its probability (0-1), summing
+to ~1, plus a "note"."""
