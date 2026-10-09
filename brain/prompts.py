@@ -173,6 +173,35 @@ that merely restates what was already known."""
 
 
 
+## ---- research orchestration (#11/#12): plan the evidence, then check for it ----
+
+EVIDENCE_PLAN = """You are planning the research for a forecasting question, BEFORE searching.
+Name the single concrete fact or value that the question RESOLVES on — the one
+thing we must find to settle it — and the best places to find it.
+
+QUESTION: {q}
+RESOLUTION CRITERIA: {rc}
+FINE PRINT: {fp}
+
+Output ONLY JSON:
+{{
+  "resolving_value": "<the one fact/number/event that decides YES vs NO>",
+  "queries": ["<2-4 specific search queries that would surface it>"],
+  "authoritative_sources": ["<the official source(s) the criteria point to, if any>"]
+}}"""
+
+ARTIFACT_CHECK = """You searched for the fact that resolves a forecasting question. Judge honestly
+whether the evidence actually CONTAINS that fact.
+
+RESOLVING VALUE WE NEEDED: {value}
+EVIDENCE GATHERED:
+{evidence}
+
+First line MUST be exactly one of: "FOUND", "PARTIAL", "MISSING".
+If PARTIAL or MISSING, a second line "RETRY: <one focused search query>" that
+would most likely close the gap. Nothing else."""
+
+
 ESTIMATE_BINARY = """Convert the completed ANALYSIS into the INGREDIENTS of a probability. Do NOT
 state a final probability — a calculator composes it from what you give.
 

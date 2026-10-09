@@ -33,11 +33,17 @@ Not every question is actor-driven. A router classifies each question:
 - [ ] OPENROUTER_API_KEY secret (owner adds, from the participation form)
 - [x] Router node (heuristic + LLM tiebreaker)
 - [x] Actor-model forecaster + measurement lane
-- [x] Falsification loop — multi-round, fresh web re-search each round, early stop
-- [x] Ensemble (template 5x median)
-- [x] Base-rate anchor first (outside view) on strategic lane
-- [x] Composed binary probability (noisy-OR over actor paths, blended with prior) — computed, not guessed
-- [x] Calibration (shrink toward 0.5, scaled by resolution horizon) — binary lane
-- [ ] Native composition + calibration for numeric/MC lanes (binary done) — next
-- [ ] Multi-model ensemble (currently 5x same model) — set when key lands
+- [x] Falsification loop — multi-round, fresh web re-search, two-sided + blind-spot targeted
+- [x] Diverse 3-lens panel (actor/game-theory + outside-view + market/status-quo), median + tiebreaker-judge on wide spread
+- [x] Answer-space witness (member states mass_yes; code reverts toward prior on mismatch)
+- [x] Sealed base-rate gate (P0 frozen; move off P0 earned via strong/moderate/weak rubric)
+- [x] Composed binary probability (branch-mixture / noisy-OR; markets as floor/ceiling) — computed, not guessed
+- [x] Numeric lane — mixture of named components per route → monotone CDF → quantile-space blend → tail widen → bound clamp
+- [x] Multiple-choice lane — per-option median of the panel, floor + renormalize, tiebreaker-judge
+- [x] Calibration (shrink toward 0.5, scaled by resolution horizon)
+- [x] Research orchestration — evidence plan + resolution-source read + artifact-check gap loop (shared bundle, time-boxed)
+- [x] Hygiene — deterministic evidence banner, date-leakage filter, parser salvage, graceful degradation on every lane
+- [x] Regression — tests/test_brain.py (17 golden-replay cases) + INCIDENTS.md
+- [ ] Learned calibration (Platt) + offline eval loop — blocked on first resolved MiniBench round
+- [ ] Multi-model LINEAGE ensemble + prompt caching (reasoning-PATH diversity already live) — set when key lands
 - [ ] Point the Actions workflow at sombra_bot.py (done at merge)

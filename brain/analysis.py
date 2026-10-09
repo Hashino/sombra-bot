@@ -42,6 +42,16 @@ def _prepare_research(question, research: str) -> tuple[str, str]:
     return out, level
 
 
+# Bounded resource budget (#18 time / #19 token reserve). Everything that can
+# starve the reasoning/forecast tail is capped here, in one place:
+#   - the optional research augmentation is time-boxed (dropped on overrun);
+#   - the falsification loop is round-bounded;
+#   - each lane runs a fixed 3 lenses + at most one judge call.
+RESEARCH_AUGMENT_TIMEOUT_S = 120.0  # augmentation is pure upside -> safe to drop
+FALSIFY_MAX_ROUNDS = 2
+FALSIFY_MAX_QUERIES = 4
+
+
 async def _ask(bot, prompt: str, role: str = "default") -> str:
     return await bot.get_llm(role, "llm").invoke(prompt)
 
@@ -70,6 +80,78 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+import re as _re
+
+_URL_RE = _re.compile(r"https?://[^\s)\]\"'>]+")
+
+
+def _extract_urls(question) -> list[str]:
+    """URLs named in the question's own criteria/fine-print/text (#11)."""
+    blob = " ".join(str(getattr(question, a, "") or "") for a in
+                     ("resolution_criteria", "fine_print", "question_text",
+                      "background_info"))
+    seen, out = set(), []
+    for u in _URL_RE.findall(blob):
+        u = u.rstrip(".,;")
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out[:4]
+
+
+async def augment_research(bot, question, news: str, max_queries: int = 4) -> str:
+    """Improvements #11/#12: plan the evidence (name the single resolving value),
+    read the resolution sources the question itself names, run targeted queries,
+    then artifact-check (found/partial/missing) with one focused retry. Returns
+    the ORIGINAL bundle augmented with the targeted findings. Fail-safe: any
+    error returns the original news unchanged (graceful degradation, #21)."""
+    try:
+        plan_raw = await _ask(bot, prompts.EVIDENCE_PLAN.format(
+            q=getattr(question, "question_text", ""),
+            rc=getattr(question, "resolution_criteria", "") or "",
+            fp=getattr(question, "fine_print", "") or ""))
+        plan = estimate.parse_estimate(plan_raw) or {}
+    except Exception:
+        return news
+
+    value = str(plan.get("resolving_value", "")).strip()
+    queries = [str(x).strip() for x in (plan.get("queries") or []) if str(x).strip()]
+    # read the sources the question points to, plus the planned queries
+    urls = _extract_urls(question)
+    url_queries = [f"What does {u} currently report regarding: {value or 'this question'}?"
+                   for u in urls]
+    todo = (url_queries + queries)[:max_queries]
+    if not todo:
+        return news
+
+    found = await asyncio.gather(*(bot.research_query(x) for x in todo),
+                                 return_exceptions=True)
+    hits = [f"Q: {q}\n{ev}" for q, ev in zip(todo, found)
+            if not isinstance(ev, Exception) and ev]
+    evidence = "\n\n".join(hits)
+
+    # artifact-check gap loop: one focused retry if the resolving value is missing
+    if value and evidence.strip():
+        try:
+            verdict = await _ask(bot, prompts.ARTIFACT_CHECK.format(
+                value=value, evidence=evidence))
+            head = (verdict or "").strip().upper()
+            if head.startswith(("PARTIAL", "MISSING")):
+                m = _re.search(r"RETRY:\s*(.+)", verdict or "", _re.I)
+                if m:
+                    extra = await bot.research_query(m.group(1).strip())
+                    if extra:
+                        evidence += f"\n\nQ (retry): {m.group(1).strip()}\n{extra}"
+        except Exception:
+            pass
+
+    header = (f"TARGETED EVIDENCE (resolves on: {value or 'see criteria'}):\n"
+              if (value or evidence) else "")
+    if not evidence.strip():
+        return news
+    return f"{news}\n\n{header}{evidence}"
+
+
 async def build_dossier(bot, question, news: str) -> str:
     """Route, run the matching structured analysis, then falsify-and-refine."""
     lane = await route(bot, question)
@@ -87,7 +169,7 @@ async def build_dossier(bot, question, news: str) -> str:
     return header + dossier
 
 
-async def _falsify(bot, question, dossier: str, news: str, max_rounds: int = 2) -> str:
+async def _falsify(bot, question, dossier: str, news: str, max_rounds: int = FALSIFY_MAX_ROUNDS) -> str:
     """Bounded, multi-round adversarial loop (sombra's verify.py, retargeted).
 
     Each round: generate queries that try to DISPROVE the READ -> run them as
@@ -99,7 +181,7 @@ async def _falsify(bot, question, dossier: str, news: str, max_rounds: int = 2) 
     for _ in range(max_rounds):
         raw = await _ask(bot, prompts.FALSIFY_QUERIES.format(q=q, dossier=dossier))
         queries = [ln.strip(" -\t") for ln in (raw or "").splitlines() if ln.strip()]
-        queries = [x for x in queries if x.upper() != "NONE"][:4]
+        queries = [x for x in queries if x.upper() != "NONE"][:FALSIFY_MAX_QUERIES]
         if not queries:
             break
         # fresh searches, concurrently (sombra's search_agent shape)

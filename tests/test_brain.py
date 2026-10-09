@@ -161,6 +161,20 @@ def test_router_lanes():
     assert m.lane == "measurement"
 
 
+# --------------------------- analysis.py (pure parts) ---------------------- #
+
+def test_extract_urls_dedupes_and_strips():
+    from brain import analysis as An
+
+    class Q:
+        resolution_criteria = "per https://ex.gov/r, see https://ex.gov/r (dupe)."
+        fine_print = "also https://data.org/s.csv)."
+        question_text = "Will X?"
+        background_info = ""
+
+    assert An._extract_urls(Q()) == ["https://ex.gov/r", "https://data.org/s.csv"]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

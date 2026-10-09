@@ -136,6 +136,21 @@ class SombraBot(FallTemplateBot2026):
             # the ensemble, so the dossier is NOT built here (built once, per
             # question, by the actor member).
             news = await super().run_research(question)
+            # #11/#12: plan the evidence, read the resolution sources the question
+            # names, artifact-check for the resolving value. Built ONCE here so
+            # every lens shares it. Time-boxed (#18/#19): the augmentation is pure
+            # upside, so if it overruns we drop it and forecast on the base bundle
+            # rather than starve the reasoning tail. Fail-safe inside too.
+            try:
+                news = await asyncio.wait_for(
+                    analysis.augment_research(self, question, news),
+                    timeout=analysis.RESEARCH_AUGMENT_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"research augmentation timed out for {question.page_url}; "
+                               "using base bundle")
+            except Exception as e:
+                logger.warning(f"research augmentation error for {question.page_url}: {e}")
             logger.info(f"sombra research for {question.page_url}:\n{news[:500]}")
             return news
 
