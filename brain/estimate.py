@@ -52,19 +52,72 @@ def calibrate(raw: float, days_to_resolution: float | None) -> float:
     return _clamp(cal, 0.02, 0.98)
 
 
+def _balanced_object(t: str) -> str | None:
+    """Return the first brace-balanced {...} substring (handles trailing prose
+    and a truncated tail by scanning for the outermost complete object)."""
+    start = t.find("{")
+    if start < 0:
+        return None
+    depth, in_str, esc = 0, False, False
+    for i in range(start, len(t)):
+        ch = t[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return t[start:i + 1]
+    return None  # never closed (truncated)
+
+
+def _salvage_json(s: str) -> dict | None:
+    """Best-effort repair of the common LLM JSON defects before giving up."""
+    for attempt in (
+        s,
+        re.sub(r",\s*([}\]])", r"\1", s),              # trailing commas
+        re.sub(r",\s*([}\]])", r"\1",
+               re.sub(r"'", '"', s)) if '"' not in s else None,  # single quotes
+    ):
+        if not attempt:
+            continue
+        try:
+            out = json.loads(attempt)
+            return out if isinstance(out, dict) else None
+        except (json.JSONDecodeError, ValueError):
+            continue
+    return None
+
+
 def parse_estimate(text: str) -> dict | None:
-    """Robustly pull the JSON estimate object out of an LLM reply."""
+    """Robustly pull the JSON estimate object out of an LLM reply, salvaging the
+    common malformations (fences, trailing commas, single quotes, trailing prose,
+    a truncated tail) rather than dropping an otherwise-usable member."""
     if not text:
         return None
     t = text.strip()
     t = re.sub(r"^```(?:json)?|```$", "", t, flags=re.I | re.M).strip()
-    m = re.search(r"\{.*\}", t, flags=re.S)
-    if not m:
-        return None
-    try:
-        return json.loads(m.group(0))
-    except json.JSONDecodeError:
-        return None
+    # prefer a brace-balanced object; fall back to greedy, then lazy
+    for cand in (_balanced_object(t),
+                 (re.search(r"\{.*\}", t, flags=re.S) or [None])[0]
+                 and re.search(r"\{.*\}", t, flags=re.S).group(0),
+                 (re.search(r"\{.*?\}", t, flags=re.S) or [None])[0]
+                 and re.search(r"\{.*?\}", t, flags=re.S).group(0)):
+        if not cand:
+            continue
+        out = _salvage_json(cand)
+        if out is not None:
+            return out
+    return None
 
 
 def estimate_probability(parsed: dict, days_to_resolution: float | None) -> tuple[float, str]:

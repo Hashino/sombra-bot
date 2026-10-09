@@ -42,11 +42,13 @@ RESEARCH (use as evidence, not as gospel):
 
 Produce the analysis in these layers, each labeled:
 
-0. OUTSIDE VIEW (base rate). Before any actor reasoning, state the reference
-   class and its base rate: how often does this KIND of outcome happen? (e.g.
-   how often announced-by-date releases ship on time, how often courts meet a
-   self-imposed deadline, how often incumbents in this position survive.) Give a
-   numeric prior BEFORE looking at the specifics. This is your anchor.
+0. SEALED BASE RATE (outside view). Before ANY actor reasoning, name the
+   reference class and state how often this KIND of outcome happens (e.g. how
+   often announced-by-date releases ship on time, how often courts meet a
+   self-imposed deadline, how often incumbents in this position survive). Commit
+   to a numeric prior P0 now and FREEZE it — you may not silently revise P0 later
+   to match your conclusion. Everything below is an argument about how far to
+   move off P0, and that move must be earned, not assumed.
 
 1. ACTORS. Enumerate every actor whose choices materially bear on this outcome.
    Name who really holds power over the result (de facto, not by title).
@@ -68,9 +70,14 @@ Produce the analysis in these layers, each labeled:
 5. PROJECTION. Play the equilibrium forward to the resolution date. What
    concretely happens, and does it satisfy the resolution criteria?
 
-6. READ. State the direction and strength of your conclusion, EXPLICITLY as a
-   move away from the base rate in layer 0 (how far, and why the actor dynamics
-   justify moving that far), and name the single biggest thing that would flip it."""
+6. READ. State the conclusion EXPLICITLY as a move from the sealed prior P0,
+   gated by this rubric:
+     - STRONG evidence (decisive, well-sourced, resolution-critical) → a large
+       move off P0 is justified.
+     - MODERATE evidence (suggestive, contested, or indirect) → a modest move.
+     - WEAK / absent evidence → stay at or very near P0.
+   Report P0, the final probability, and which rubric tier the actor dynamics
+   earned. Name the single biggest thing that would flip the READ."""
 
 MEASUREMENT = """You are a disciplined quantitative forecaster. Avoid narrative; anchor on data.
 
@@ -129,17 +136,25 @@ that now reflects the surviving evidence. Make the final READ unambiguous about
 direction and strength."""
 
 
-FALSIFY_QUERIES = """You are red-teaming the forecast below. Produce web-search queries whose
-results could DISPROVE its READ — target the weakest premise, the most
-resolution-critical fact, or recent developments that might reverse it.
+FALSIFY_QUERIES = """You are red-teaming the forecast below. Produce web-search queries that could
+MOVE its READ — in EITHER direction. Do not only seek disconfirming evidence;
+also seek the strongest CONFIRMING fact that would harden it. Spend at least one
+query probing this analysis's specific BLIND SPOTS, because it was built from a
+material-interest / game-theory lens that systematically under-weights:
+  - non-material motives (ideology, personal/ego, reputation, spite, belief);
+  - institutional / procedural / accidental paths (bureaucratic inertia, a legal
+    technicality, a deadline slip, a resignation, an exogenous shock, scandal);
+  - the possibility that the resolution criteria hinge on a detail the strategic
+    story ignores.
 
 QUESTION: {q}
 ANALYSIS:
 {dossier}
 
 Output up to 4 search queries, ONE PER LINE, no numbering, no commentary. Each
-query should be specific and recent-evidence-seeking. If the analysis cannot be
-meaningfully attacked with new evidence, output the single line: NONE"""
+specific and recent-evidence-seeking; mix confirming, disconfirming, and
+blind-spot probes. If the analysis genuinely cannot be tested with new evidence,
+output the single line: NONE"""
 
 FALSIFY_JUDGE = """You gathered fresh evidence to test a forecast. Decide, honestly, whether the
 new evidence should MOVE the analysis's READ (its direction or strength).

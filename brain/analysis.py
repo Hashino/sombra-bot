@@ -12,6 +12,34 @@ from datetime import datetime, timezone
 from . import prompts
 from . import router
 from . import estimate
+from . import hygiene
+
+
+def _resolution_date(question):
+    """A date object for the question's resolution/close, for the leakage filter."""
+    from datetime import datetime, timezone
+    for attr in ("scheduled_resolution_time", "actual_resolve_time",
+                 "scheduled_close_time", "actual_close_time", "close_time"):
+        val = getattr(question, attr, None)
+        if not val:
+            continue
+        try:
+            if isinstance(val, str):
+                val = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            return val.date() if hasattr(val, "date") else None
+        except Exception:
+            continue
+    return None
+
+
+def _prepare_research(question, research: str) -> tuple[str, str]:
+    """Deterministic pre-pass shared by every lane: drop post-cutoff sources
+    (#14) and stamp an authoritative evidence banner (#20). Returns
+    (research_for_llm, evidence_level)."""
+    clean = hygiene.drop_sources_after(research or "", _resolution_date(question))
+    level, banner = hygiene.evidence_state(clean)
+    out = (banner + "\n\n" + clean) if banner else clean
+    return out, level
 
 
 async def _ask(bot, prompt: str, role: str = "default") -> str:
@@ -142,6 +170,7 @@ async def run_ensemble_binary(bot, question, research: str) -> tuple[float, str]
     import asyncio
     from . import aggregate, estimate as E
 
+    research, ev_level = _prepare_research(question, research)
     # the actor member gets the full falsification-hardened dossier; the other
     # two are lighter, deliberately decorrelated reasoning paths.
     actor_dossier = await build_dossier(bot, question, research)
@@ -175,7 +204,8 @@ async def run_ensemble_binary(bot, question, research: str) -> tuple[float, str]
                  + "\n".join(f"- {m['lens']}: {m['prob']:.0%}"
                               + ("" if m["witness_ok"] else " [witness reverted]")
                               + f" — {m['note']}" for m in members)
-                 + f"\n\nAGGREGATION: {method} -> calibrated {final:.1%}")
+                 + f"\n\nEVIDENCE: {ev_level}"
+                 + f"\nAGGREGATION: {method} -> calibrated {final:.1%}")
     return final, reasoning
 
 
@@ -243,6 +273,7 @@ async def run_ensemble_numeric(bot, question, research: str) -> tuple[dict, str]
     outside-view and status-quo decorrelate it; code blends in quantile space."""
     from . import numeric as N
 
+    research, _ = _prepare_research(question, research)
     lo, hi, open_lo, open_hi, unit = _numeric_bounds(question)
     dossier = await build_dossier(bot, question, research)
     members = await asyncio.gather(
@@ -312,6 +343,7 @@ async def run_ensemble_multiple_choice(bot, question, research: str) -> tuple[di
     if not options:
         return {}, "(no options on question)"
 
+    research, _ = _prepare_research(question, research)
     dossier = await build_dossier(bot, question, research)
     members = await asyncio.gather(
         _mc_member(bot, question, "actor", dossier, options),
